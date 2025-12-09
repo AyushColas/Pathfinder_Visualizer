@@ -1,5 +1,3 @@
-##Live Project at: https://pathfinder-visualizer-sable.vercel.app/
-
 
 # Pathfinder
 
