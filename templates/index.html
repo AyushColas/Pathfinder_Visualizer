@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pathfinder</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0a0a0a;
+            color: #fff;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        canvas {
+            display: block;
+            cursor: crosshair;
+            position: fixed;
+            top: 0;
+            left: 0;
+        }
+
+        .overlay {
+            position: fixed;
+            z-index: 10;
+            pointer-events: none;
+        }
+
+        .stats {
+            top: 16px;
+            left: 16px;
+            font-size: 13px;
+            color: rgba(255,255,255,0.8);
+            background: rgba(0,0,0,0.6);
+            padding: 12px 16px;
+            border-radius: 8px;
+            backdrop-filter: blur(10px);
+        }
+
+        .stats div {
+            margin-bottom: 4px;
+        }
+
+        .stats span {
+            color: #4ade80;
+            font-weight: 500;
+        }
+
+        .instructions {
+            top: 16px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 13px;
+            color: rgba(255,255,255,0.6);
+            background: rgba(0,0,0,0.6);
+            padding: 10px 16px;
+            border-radius: 6px;
+            backdrop-filter: blur(10px);
+        }
+
+        .controls {
+            bottom: 24px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 12px;
+            pointer-events: auto;
+        }
+
+        button {
+            padding: 10px 20px;
+            border: 1px solid rgba(255,255,255,0.2);
+            background: rgba(0,0,0,0.6);
+            color: #fff;
+            font-size: 13px;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+            backdrop-filter: blur(10px);
+        }
+
+        button:hover {
+            background: rgba(255,255,255,0.1);
+            border-color: rgba(255,255,255,0.3);
+        }
+
+        .legend {
+            top: 16px;
+            right: 16px;
+            font-size: 12px;
+            color: rgba(255,255,255,0.7);
+            background: rgba(0,0,0,0.6);
+            padding: 12px 16px;
+            border-radius: 8px;
+            backdrop-filter: blur(10px);
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 6px;
+        }
+
+        .legend-item:last-child {
+            margin-bottom: 0;
+        }
+
+        .legend-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+        }
+
+        .legend-dot.start { background: #4ade80; }
+        .legend-dot.end { background: #f87171; }
+        .legend-dot.path { background: #facc15; }
+    </style>
+</head>
+<body>
+    <canvas id="graph"></canvas>
+    
+    <div class="overlay stats">
+        <div>Distance: <span id="distance">-</span></div>
+        <div>Nodes: <span id="explored">-</span></div>
+        <div>Time: <span id="time">-</span></div>
+    </div>
+    
+    <div class="overlay instructions">Click a node to set start, click another for end</div>
+    
+    <div class="overlay legend">
+        <div class="legend-item"><div class="legend-dot start"></div> Start</div>
+        <div class="legend-item"><div class="legend-dot end"></div> End</div>
+        <div class="legend-item"><div class="legend-dot path"></div> Path</div>
+    </div>
+    
+    <div class="overlay controls">
+        <button onclick="generateGraph()">New Graph</button>
+        <button onclick="clearSelection()">Clear</button>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('graph');
+        const ctx = canvas.getContext('2d');
+        
+        let nodes = [];
+        let edges = [];
+        let startNode = null;
+        let endNode = null;
+        let pathNodes = [];
+        let pathEdgeSet = new Set();
+        
+        function resize() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            generateGraph();
+        }
+        
+        window.addEventListener('resize', resize);
+        
+        function generateGraph() {
+            const padding = 10;
+            const w = canvas.width - padding * 2;
+            const h = canvas.height - padding * 2;
+            
+            nodes = [];
+            edges = [];
+            startNode = null;
+            endNode = null;
+            pathNodes = [];
+            pathEdgeSet.clear();
+            updateStats(null);
+            
+            const cols = 50;
+            const rows = 50;
+            const cellW = w / (cols - 1);
+            const cellH = h / (rows - 1);
+            
+            for (let r = 0; r < rows; r++) {
+                for (let c = 0; c < cols; c++) {
+                    const jitterX = (Math.random() - 0.5) * cellW * 0.5;
+                    const jitterY = (Math.random() - 0.5) * cellH * 0.5;
+                    nodes.push({
+                        id: `${r}-${c}`,
+                        x: padding + c * cellW + jitterX,
+                        y: padding + r * cellH + jitterY
+                    });
+                }
+            }
+            
+            for (let r = 0; r < rows; r++) {
+                for (let c = 0; c < cols; c++) {
+                    const idx = r * cols + c;
+                    
+                    if (c < cols - 1 && Math.random() > 0.1) {
+                        edges.push({ from: idx, to: idx + 1 });
+                    }
+                    if (r < rows - 1 && Math.random() > 0.1) {
+                        edges.push({ from: idx, to: idx + cols });
+                    }
+                    if (c < cols - 1 && r < rows - 1 && Math.random() > 0.7) {
+                        edges.push({ from: idx, to: idx + cols + 1 });
+                    }
+                    if (c > 0 && r < rows - 1 && Math.random() > 0.7) {
+                        edges.push({ from: idx, to: idx + cols - 1 });
+                    }
+                }
+            }
+            
+            draw();
+        }
+        
+        function getDistance(n1, n2) {
+            return Math.sqrt((n1.x - n2.x) ** 2 + (n1.y - n2.y) ** 2);
+        }
+        
+        function buildPathEdgeSet() {
+            pathEdgeSet.clear();
+            for (let i = 0; i < pathNodes.length - 1; i++) {
+                const id1 = pathNodes[i];
+                const id2 = pathNodes[i + 1];
+                pathEdgeSet.add(`${id1}-${id2}`);
+                pathEdgeSet.add(`${id2}-${id1}`);
+            }
+        }
+        
+        function draw() {
+            ctx.fillStyle = '#0a0a0a';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+            ctx.lineWidth = 0.5;
+            ctx.beginPath();
+            edges.forEach(edge => {
+                const n1 = nodes[edge.from];
+                const n2 = nodes[edge.to];
+                const key = `${n1.id}-${n2.id}`;
+                if (!pathEdgeSet.has(key)) {
+                    ctx.moveTo(n1.x, n1.y);
+                    ctx.lineTo(n2.x, n2.y);
+                }
+            });
+            ctx.stroke();
+            
+            if (pathEdgeSet.size > 0) {
+                ctx.strokeStyle = '#facc15';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                edges.forEach(edge => {
+                    const n1 = nodes[edge.from];
+                    const n2 = nodes[edge.to];
+                    const key = `${n1.id}-${n2.id}`;
+                    if (pathEdgeSet.has(key)) {
+                        ctx.moveTo(n1.x, n1.y);
+                        ctx.lineTo(n2.x, n2.y);
+                    }
+                });
+                ctx.stroke();
+            }
+            
+            const pathNodeSet = new Set(pathNodes);
+            
+            ctx.fillStyle = 'rgba(255,255,255,0.25)';
+            ctx.beginPath();
+            nodes.forEach((node, idx) => {
+                if (startNode !== idx && endNode !== idx && !pathNodeSet.has(node.id)) {
+                    ctx.moveTo(node.x + 2, node.y);
+                    ctx.arc(node.x, node.y, 2, 0, Math.PI * 2);
+                }
+            });
+            ctx.fill();
+            
+            if (pathNodeSet.size > 0) {
+                ctx.fillStyle = '#facc15';
+                ctx.beginPath();
+                nodes.forEach((node, idx) => {
+                    if (pathNodeSet.has(node.id) && startNode !== idx && endNode !== idx) {
+                        ctx.moveTo(node.x + 3, node.y);
+                        ctx.arc(node.x, node.y, 3, 0, Math.PI * 2);
+                    }
+                });
+                ctx.fill();
+            }
+            
+            if (startNode !== null) {
+                ctx.fillStyle = '#4ade80';
+                ctx.beginPath();
+                ctx.arc(nodes[startNode].x, nodes[startNode].y, 6, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            
+            if (endNode !== null) {
+                ctx.fillStyle = '#f87171';
+                ctx.beginPath();
+                ctx.arc(nodes[endNode].x, nodes[endNode].y, 6, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+        
+        function findPath() {
+            if (startNode === null || endNode === null) return;
+            
+            const graphData = {
+                nodes: nodes.map(n => ({ id: n.id, x: n.x, y: n.y })),
+                edges: edges.map(e => ({
+                    from: nodes[e.from].id,
+                    to: nodes[e.to].id,
+                    weight: getDistance(nodes[e.from], nodes[e.to])
+                }))
+            };
+            
+            fetch('/api/pathfind/astar', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    graph: graphData,
+                    start: nodes[startNode].id,
+                    end: nodes[endNode].id,
+                    heuristic: 'euclidean'
+                })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    pathNodes = data.result.path;
+                    buildPathEdgeSet();
+                    updateStats(data.result);
+                } else {
+                    pathNodes = [];
+                    pathEdgeSet.clear();
+                    updateStats(null);
+                }
+                draw();
+            })
+            .catch(() => {
+                pathNodes = [];
+                pathEdgeSet.clear();
+                draw();
+            });
+        }
+        
+        function updateStats(result) {
+            document.getElementById('distance').textContent = result ? result.distance.toFixed(1) + 'px' : '-';
+            document.getElementById('explored').textContent = result ? result.nodes_explored : '-';
+            document.getElementById('time').textContent = result ? result.execution_time_ms.toFixed(2) + 'ms' : '-';
+        }
+        
+        function clearSelection() {
+            startNode = null;
+            endNode = null;
+            pathNodes = [];
+            pathEdgeSet.clear();
+            updateStats(null);
+            draw();
+        }
+        
+        canvas.addEventListener('click', (e) => {
+            const x = e.clientX;
+            const y = e.clientY;
+            
+            let closest = null;
+            let minDist = Infinity;
+            
+            nodes.forEach((node, idx) => {
+                const dist = Math.sqrt((node.x - x) ** 2 + (node.y - y) ** 2);
+                if (dist < minDist && dist < 20) {
+                    minDist = dist;
+                    closest = idx;
+                }
+            });
+            
+            if (closest !== null) {
+                if (startNode === null) {
+                    startNode = closest;
+                    pathNodes = [];
+                    pathEdgeSet.clear();
+                } else if (endNode === null && closest !== startNode) {
+                    endNode = closest;
+                    findPath();
+                } else {
+                    startNode = closest;
+                    endNode = null;
+                    pathNodes = [];
+                    pathEdgeSet.clear();
+                    updateStats(null);
+                }
+                draw();
+            }
+        });
+        
+        resize();
+    </script>
+</body>
+</html>
